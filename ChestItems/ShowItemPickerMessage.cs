@@ -8,22 +8,26 @@ namespace ChestItems
     internal sealed class ShowItemPickerMessage : INetMessage 
     {
         private NetworkInstanceId targetId;
+        private string requestToken;
         private List<PickupIndex> pickups;
 
         public ShowItemPickerMessage() 
         {
+            requestToken = string.Empty;
             pickups = new List<PickupIndex>();
         }
 
-        internal ShowItemPickerMessage(NetworkInstanceId targetId, List<PickupIndex> pickups) 
+        internal ShowItemPickerMessage(NetworkInstanceId targetId, string requestToken, List<PickupIndex> pickups) 
         {
             this.targetId = targetId;
+            this.requestToken = requestToken;
             this.pickups = pickups;
         }
 
         public void Serialize(NetworkWriter writer) 
         {
             writer.Write(targetId);
+            writer.Write(requestToken);
             writer.Write(pickups.Count);
 
             foreach (PickupIndex pickup in pickups) 
@@ -35,6 +39,7 @@ namespace ChestItems
         public void Deserialize(NetworkReader reader) 
         {
             targetId = reader.ReadNetworkId();
+            requestToken = reader.ReadString();
 
             int count = reader.ReadInt32();
             pickups = new List<PickupIndex>(count);
@@ -47,7 +52,7 @@ namespace ChestItems
 
         public void OnReceived() 
         {
-            ChestItemsPlugin.Instance?.HandleShowItemPicker(targetId, pickups);
+            ChestItemsPlugin.Instance?.HandleShowItemPicker(targetId, requestToken, pickups);
         }
     }
 }

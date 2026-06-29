@@ -22,6 +22,26 @@ namespace ChestItems {
         private const string ModGuid = "com.github.mcmrarm.chestitempicker";
         private RoR2PrivateFieldAccess privateFieldAccess;
 
+        private const float PendingPickerRequestTimeoutSeconds = 30f;
+
+        private readonly Dictionary<NetworkInstanceId, PendingPickerRequest> pendingPickerRequests = new Dictionary<NetworkInstanceId, PendingPickerRequest>();
+
+        private sealed class PendingPickerRequest 
+        {
+            internal PendingPickerRequest(NetworkInstanceId targetId, string requestToken, PickupIndex generatedPickup, float createdAt) 
+            {
+                TargetId = targetId;
+                RequestToken = requestToken;
+                GeneratedPickup = generatedPickup;
+                CreatedAt = createdAt;
+            }
+
+            internal NetworkInstanceId TargetId { get; }
+            internal string RequestToken { get; }
+            internal PickupIndex GeneratedPickup { get; }
+            internal float CreatedAt { get; }
+        }
+
         private void Awake() 
         {
             Instance = this;
@@ -141,6 +161,7 @@ namespace ChestItems {
             List<PickupIndex> pickups = GetAvailablePickups(generatedPickup);
             if (pickups.Count == 0)
                 return false;
+            
 
             if (user.connectionToClient == null) 
             {
@@ -148,7 +169,8 @@ namespace ChestItems {
                 return false;
             }
 
-            new ShowItemPickerMessage(ctr.netId, pickups).Send(user.connectionToClient);
+            PendingPickerRequest request = CreatePendingPickerRequest(ctr.netId, generatedPickup);
+            new ShowItemPickerMessage(ctr.netId, request.RequestToken, pickups).Send(user.connectionToClient);
             return true;
         }
 
@@ -305,30 +327,127 @@ namespace ChestItems {
 
         public delegate void ItemCallback(PickupIndex index);
 
-        internal void HandleShowItemPicker(NetworkInstanceId targetId, List<PickupIndex> pickups) 
+        internal void HandleShowItemPicker(NetworkInstanceId targetId, string requestToken, List<PickupIndex> pickups) 
         {
-            ShowItemPicker(pickups, selectedPickup => SendItemPicked(targetId, selectedPickup));
+            ShowItemPicker(pickups, selectedPickup => SendItemPicked(targetId, requestToken, selectedPickup));
         }
 
-        private void SendItemPicked(NetworkInstanceId targetId, PickupIndex selectedPickup) 
+        private void SendItemPicked(NetworkInstanceId targetId, string requestToken, PickupIndex selectedPickup) 
         {
-            new ItemPickedMessage(targetId, selectedPickup).Send(NetworkDestination.Server);
+            new ItemPickedMessage(targetId, requestToken, selectedPickup).Send(NetworkDestination.Server);
         }
 
-        internal void HandleItemPicked(NetworkInstanceId targetId, PickupIndex selectedPickup) 
+        internal void HandleItemPicked(NetworkInstanceId targetId, string requestToken, PickupIndex selectedPickup) 
         {
-            GameObject targetObject = Util.FindNetworkObject(targetId);
-            if (targetObject == null) 
+            if (!NetworkServer.active) 
+                return;
+            
+
+            RemoveExpiredPendingPickerRequests();
+
+            if (!pendingPickerRequests.TryGetValue(targetId, out PendingPickerRequest request)) 
             {
-                Logger.LogWarning($"Could not apply selected pickup because network object {targetId} was not found.");
+                Logger.LogWarning($"Rejected item picker response for {targetId} because no pending picker request exists.");
                 return;
             }
 
+            if (!string.Equals(request.RequestToken, requestToken, StringComparison.Ordinal)) 
+            {
+                Logger.LogWarning($"Rejected item picker response for {targetId} because the request token did not match.");
+                return;
+            }
+
+            GameObject targetObject = Util.FindNetworkObject(targetId);
+            if (targetObject == null) 
+            {
+                pendingPickerRequests.Remove(targetId);
+                Logger.LogWarning($"Rejected item picker response because network object {targetId} was not found.");
+                return;
+            }
+
+            if (!TryGetCurrentGeneratedPickup(targetObject, out PickupIndex currentGeneratedPickup)) 
+            {
+                pendingPickerRequests.Remove(targetId);
+                Logger.LogWarning($"Rejected item picker response because generated pickup could not be read for {targetId}.");
+                return;
+            }
+
+            if (!request.GeneratedPickup.Equals(currentGeneratedPickup)) 
+            {
+                pendingPickerRequests.Remove(targetId);
+                Logger.LogWarning($"Rejected item picker response for {targetId} because the generated pickup changed before selection was applied.");
+                return;
+            }
+
+            List<PickupIndex> currentAllowedPickups = GetAvailablePickups(currentGeneratedPickup);
+            if (!PickupListContains(currentAllowedPickups, selectedPickup)) 
+            {
+                Logger.LogWarning($"Rejected invalid pickup selection {selectedPickup} for target {targetId}.");
+                return;
+            }
+
+            pendingPickerRequests.Remove(targetId);
+            ApplySelectedPickup(targetObject, selectedPickup);
+        }
+
+        private PendingPickerRequest CreatePendingPickerRequest(NetworkInstanceId targetId, PickupIndex generatedPickup) 
+        {
+            RemoveExpiredPendingPickerRequests();
+
+            var request = new PendingPickerRequest(targetId, Guid.NewGuid().ToString("N"), generatedPickup, Time.realtimeSinceStartup);
+            pendingPickerRequests[targetId] = request;
+            return request;
+        }
+
+        private void RemoveExpiredPendingPickerRequests() 
+        {
+            float now = Time.realtimeSinceStartup;
+            var expiredTargetIds = new List<NetworkInstanceId>();
+
+            foreach (KeyValuePair<NetworkInstanceId, PendingPickerRequest> pair in pendingPickerRequests) 
+            {
+                if (now - pair.Value.CreatedAt > PendingPickerRequestTimeoutSeconds) 
+                    expiredTargetIds.Add(pair.Key);                
+            }
+
+            foreach (NetworkInstanceId targetId in expiredTargetIds) 
+            {
+                pendingPickerRequests.Remove(targetId);
+            }
+        }
+
+        private static bool PickupListContains(List<PickupIndex> pickups, PickupIndex selectedPickup) 
+        {
+            foreach (PickupIndex pickup in pickups) 
+            {
+                if (pickup.Equals(selectedPickup)) 
+                    return true;
+            }
+            return false;
+        }
+
+        private bool TryGetCurrentGeneratedPickup(GameObject targetObject, out PickupIndex generatedPickup) 
+        {
+            generatedPickup = default;
+
+            var chest = targetObject.GetComponent<ChestBehavior>();
+            if (chest != null) 
+                return privateFieldAccess.TryGetChestDropPickup(chest, out generatedPickup);
+            
+            var terminal = targetObject.GetComponent<ShopTerminalBehavior>();
+            if (terminal != null) 
+                return privateFieldAccess.TryGetShopTerminalPickupIndex(terminal, out generatedPickup);
+            
+            return false;
+        }
+
+        private void ApplySelectedPickup(GameObject targetObject, PickupIndex selectedPickup) 
+        {
             var chest = targetObject.GetComponent<ChestBehavior>();
             if (chest != null) 
             {
                 if (!privateFieldAccess.TrySetChestDropPickup(chest, selectedPickup)) 
-                    return;
+                    return;             
 
                 if (FindPersistentListener(chest.GetComponent<PurchaseInteraction>().onPurchase, chest, "ItemDrop") != -1) 
                     chest.ItemDrop();
@@ -347,7 +466,8 @@ namespace ChestItems {
                 terminal.SetNoPickup();
                 return;
             }
-            Logger.LogWarning($"Selected pickup target {targetId} was not a supported chest or shop terminal.");
+
+            Logger.LogWarning("Selected pickup target was not a supported chest or shop terminal.");
         }
     }
 }
