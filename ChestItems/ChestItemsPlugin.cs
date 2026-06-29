@@ -6,7 +6,6 @@ using RoR2;
 using RoR2.UI;
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -20,33 +19,39 @@ namespace ChestItems {
     public class ChestItemsPlugin : BaseUnityPlugin {
 
         private const string ModGuid = "com.github.mcmrarm.chestitempicker";
-
-        private static FieldInfo chestBehaviorDropPickupMember = typeof(ChestBehavior).GetField("dropPickup", BindingFlags.NonPublic | BindingFlags.Instance);
-        private static FieldInfo shopTerminalBehaviorPickupIndexMember = typeof(ShopTerminalBehavior).GetField("pickupIndex", BindingFlags.NonPublic | BindingFlags.Instance);
-        private static FieldInfo multiShopControllerGameObjectsMember = typeof(MultiShopController).GetField("terminalGameObjects", BindingFlags.NonPublic | BindingFlags.Instance);
-
-
+        private RoR2PrivateFieldAccess privateFieldAccess;
         public void Start() {
-
+            privateFieldAccess = new RoR2PrivateFieldAccess(Logger);
+            if (!privateFieldAccess.IsAvailable) 
+            {
+                Logger.LogError("Chest Item Picker is disabled because required RoR2 private fields could not be resolved. This usually means the game updated and the mod needs a compatibility update.");
+                enabled = false;
+                return;
+            }
 
             On.RoR2.ChestBehavior.Start += (orig, self) => {
                 orig(self);
-                // By default the listener list contains: [0]PurchaseInteraction.SetAvailable(false) and [1]ChestBehavior.Open()
+
                 var purchaseInteraction = self.GetComponent<PurchaseInteraction>();
-                DisablePersistentListener(purchaseInteraction.onPurchase, self, "ItemDrop"); // Rusty Lockbox
+                DisablePersistentListener(purchaseInteraction.onPurchase, self, "ItemDrop");
                 DisablePersistentListener(purchaseInteraction.onPurchase, self, "Open");
                 purchaseInteraction.onPurchase.AddListener((v) => {
-                    var generatedPickup = (PickupIndex)chestBehaviorDropPickupMember.GetValue(self);
-                    if (!HandlePurchaseInteraction(v, self, generatedPickup))
+                    if (!privateFieldAccess.TryGetChestDropPickup(self, out PickupIndex generatedPickup) || !HandlePurchaseInteraction(v, self, generatedPickup)) {
                         self.Open();
+                    }
                 });
             };
             On.RoR2.ShopTerminalBehavior.Start += (orig, self) => {
                 orig(self);
-                var generatedPickup = self.NetworkpickupIndex;
-                if (!self.Networkhidden)
+
+                if (!self.Networkhidden) 
                     return;
-                // By default the listener list contains: [0]PurchaseInteraction.SetAvailable(false), [1]ShopTerminalBehavior.DropPickup(), [2]ShopTerminalBehavior.SetNoPickup()
+                
+
+                if (!privateFieldAccess.TryGetShopTerminalPickupIndex(self, out PickupIndex generatedPickup)) 
+                    return;
+                
+
                 var purchaseInteraction = self.GetComponent<PurchaseInteraction>();
                 DisablePersistentListener(purchaseInteraction.onPurchase, self, "DropPickup");
                 DisablePersistentListener(purchaseInteraction.onPurchase, self, "SetNoPickup");
@@ -63,74 +68,97 @@ namespace ChestItems {
             };
         }
 
-        private static int FindPersistentListener(UnityEventBase ev, UnityEngine.Object target, string methodName) {
-            for (int i = 0; i < ev.GetPersistentEventCount(); i++) {
+        private static int FindPersistentListener(UnityEventBase ev, UnityEngine.Object target, string methodName) 
+        {
+            for (int i = 0; i < ev.GetPersistentEventCount(); i++) 
+            {
                 if (ev.GetPersistentTarget(i) == target && ev.GetPersistentMethodName(i) == methodName)
                     return i;
             }
             return -1;
         }
 
-        private static void DisablePersistentListener(UnityEventBase ev, UnityEngine.Object target, string methodName) {
+        private static void DisablePersistentListener(UnityEventBase ev, UnityEngine.Object target, string methodName) 
+        {
             int index = FindPersistentListener(ev, target, methodName);
             if (index != -1)
                 ev.SetPersistentListenerState(index, UnityEventCallState.Off);
         }
 
-        private List<PickupIndex> GetAvailablePickups(PickupIndex generatedPickup) {
+        private List<PickupIndex> GetAvailablePickups(PickupIndex generatedPickup) 
+        {
             var availablePickups = new List<PickupIndex>();
             if (generatedPickup.itemIndex != ItemIndex.None) {
                 var tier = ItemCatalog.GetItemDef(generatedPickup.itemIndex).tier;
                 if (tier == ItemTier.Tier1 || tier == ItemTier.Tier2 || tier == ItemTier.Tier3)
                     availablePickups.AddRange(Run.instance.availableTier1DropList);
+
                 if (tier == ItemTier.Tier2 || tier == ItemTier.Tier3)
                     availablePickups.AddRange(Run.instance.availableTier2DropList);
+
                 if (tier == ItemTier.Tier3)
                     availablePickups.AddRange(Run.instance.availableTier3DropList);
+
                 if (tier == ItemTier.Lunar)
-                    availablePickups.AddRange(Run.instance.availableLunarDropList);
+                    availablePickups.AddRange(Run.instance.availableLunarItemDropList);
+
+
                 //if (tier != ItemTier.Tier1 && tier != ItemTier.Tier2 && tier != ItemTier.Tier3 && tier != ItemTier.Lunar)
                 //    return;
-            } else if (generatedPickup.equipmentIndex != EquipmentIndex.None) {
-                if (EquipmentCatalog.GetEquipmentDef(generatedPickup.equipmentIndex).isLunar) {
-                    availablePickups.AddRange(Run.instance.availableLunarDropList);
-                } else {
+            } 
+            
+            else if (generatedPickup.equipmentIndex != EquipmentIndex.None) 
+            {
+                if (EquipmentCatalog.GetEquipmentDef(generatedPickup.equipmentIndex).isLunar) 
+                    availablePickups.AddRange(Run.instance.availableLunarEquipmentDropList);
+                else 
                     availablePickups.AddRange(Run.instance.availableEquipmentDropList);
-                }
             }
             return availablePickups;
         }
 
-        private bool HandlePurchaseInteraction(Interactor interactor, NetworkBehaviour ctr, PickupIndex generatedPickup) {
+        private bool HandlePurchaseInteraction(Interactor interactor, NetworkBehaviour ctr, PickupIndex generatedPickup) 
+        {
             var user = interactor.GetComponent<CharacterBody>()?.master?.GetComponent<PlayerCharacterMasterController>()?.networkUser;
             if (user == null)
                 return false;
+
             List<PickupIndex> pickups = GetAvailablePickups(generatedPickup);
             if (pickups.Count == 0)
                 return false;
+
             CallNetShowItemPicker(user, ctr.netId, pickups);
             return true;
         }
 
-        private void HandlePostCreateMultiShopTerminals(MultiShopController multiShop) {
+        private void HandlePostCreateMultiShopTerminals(MultiShopController multiShop) 
+        {
             // Show items from all terminals except for one
-            GameObject[] objects = (GameObject[])multiShopControllerGameObjectsMember.GetValue(multiShop);
+            if (!privateFieldAccess.TryGetMultiShopTerminalGameObjects(multiShop, out GameObject[] objects)) {
+                return;
+}
+
             GameObject hidden = null;
-            foreach (GameObject o in objects) {
+            foreach (GameObject o in objects) 
+            {
                 if (o.GetComponent<ShopTerminalBehavior>().Networkhidden)
                     hidden = o;
             }
+
             if (hidden == null)
                 hidden = Run.instance.treasureRng.NextElementUniform<GameObject>(objects);
+
             foreach (GameObject o in objects)
                 o.GetComponent<ShopTerminalBehavior>().Networkhidden = (o == hidden);
 
             // Fix anim - Don't close the terminal we are picking the item from.
-            foreach (GameObject gameObject in objects) {
+            foreach (GameObject gameObject in objects) 
+            {
                 // Remove the .DisableAllTerminals listener and reimplement it
                 gameObject.GetComponent<PurchaseInteraction>().onPurchase.RemoveAllListeners();
                 gameObject.GetComponent<PurchaseInteraction>().onPurchase.AddListener((v) => {
-                    foreach (GameObject other in objects) {
+                    foreach (GameObject other in objects) 
+                    {
                         if (other == gameObject) // CHANGE: exclude the terminal we are opening
                             continue;
                         other.GetComponent<PurchaseInteraction>().Networkavailable = false;
@@ -141,12 +169,14 @@ namespace ChestItems {
             }
         }
 
-        private void ShowItemPicker(List<PickupIndex> availablePickups, ItemCallback cb) {
+        private void ShowItemPicker(List<PickupIndex> availablePickups, ItemCallback cb) 
+        {
             var itemInventoryDisplay = GameObject.Find("ItemInventoryDisplay");
 
             float uiWidth = 400f;
             if (availablePickups.Count > 8 * 5) // at least 5 rows of 8 items
                 uiWidth = 500f;
+
             if (availablePickups.Count > 10 * 5) // at least 5 rows of 10 items
                 uiWidth = 600f;
 
@@ -214,9 +244,11 @@ namespace ChestItems {
             itemCtr.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             
             var itemIconPrefab = itemInventoryDisplay.GetComponent<ItemInventoryDisplay>().itemIconPrefab;
-            foreach (PickupIndex index in availablePickups) {
+            foreach (PickupIndex index in availablePickups) 
+            {
                 if (index.itemIndex == ItemIndex.None)
                     continue;
+
                 var item = Instantiate<GameObject>(itemIconPrefab, itemCtr.transform).GetComponent<ItemIcon>();
                 item.SetItemIndex(index.itemIndex, 1);
                 item.gameObject.AddComponent<Button>().onClick.AddListener(() => {
@@ -225,9 +257,11 @@ namespace ChestItems {
                     cb(index);
                 });
             }
-            foreach (PickupIndex index in availablePickups) {
+            foreach (PickupIndex index in availablePickups) 
+            {
                 if (index.equipmentIndex == EquipmentIndex.None)
                     continue;
+
                 var def = EquipmentCatalog.GetEquipmentDef(index.equipmentIndex);
                 var item = Instantiate<GameObject>(itemIconPrefab, itemCtr.transform).GetComponent<ItemIcon>();
                 item.GetComponent<RawImage>().texture = def.pickupIconTexture;
@@ -252,7 +286,8 @@ namespace ChestItems {
         // I used the annotations to just make the code more readable, they are unused if compiling via VS (and if compiling via unity they add additional asserts)
 
         [Client]
-        private void NetShowItemPicker(NetworkUser user, NetworkReader reader) {
+        private void NetShowItemPicker(NetworkUser user, NetworkReader reader) 
+        {
             var chestId = reader.ReadNetworkId();
             int count = reader.ReadInt32();
             var pickups = new List<PickupIndex>(count);
@@ -263,7 +298,8 @@ namespace ChestItems {
         }
 
         [Server]
-        private void CallNetShowItemPicker(NetworkUser user, NetworkInstanceId chestId, List<PickupIndex> pickups) {
+        private void CallNetShowItemPicker(NetworkUser user, NetworkInstanceId chestId, List<PickupIndex> pickups) 
+        {
             NetShowItemPickerAction.Invoke(w => {
                 w.Write(chestId);
                 w.Write(pickups.Count);
@@ -273,27 +309,38 @@ namespace ChestItems {
         }
 
         [Server]
-        private void NetItemPicked(NetworkUser user, NetworkReader reader) {
+        private void NetItemPicked(NetworkUser user, NetworkReader reader) 
+        {
             var chestNetId = reader.ReadNetworkIdentity();
             var selectedPickup = PickupIndex.ReadFromNetworkReader(reader);
             
             var chest = chestNetId.GetComponent<ChestBehavior>();
-            if (chest != null) {
-                chestBehaviorDropPickupMember.SetValue(chest, selectedPickup);
+            if (chest != null) 
+            {
+                if (!privateFieldAccess.TrySetChestDropPickup(chest, selectedPickup)) 
+                    return;
+                
+
                 if (FindPersistentListener(chest.GetComponent<PurchaseInteraction>().onPurchase, chest, "ItemDrop") != -1) // Rusty Lockbox
                     chest.ItemDrop();
+
                 chest.Open();
             }
+
             var terminal = chestNetId.GetComponent<ShopTerminalBehavior>();
-            if (terminal != null) {
-                shopTerminalBehaviorPickupIndexMember.SetValue(terminal, selectedPickup);
+            if (terminal != null) 
+            {
+                if (!privateFieldAccess.TrySetShopTerminalPickupIndex(terminal, selectedPickup)) 
+                    return;
+                
                 terminal.DropPickup();
                 terminal.SetNoPickup();
             }
         }
 
         [Client]
-        private void CallNetItemPicked(NetworkInstanceId chestId, PickupIndex selectedPickup) {
+        private void CallNetItemPicked(NetworkInstanceId chestId, PickupIndex selectedPickup) 
+        {
             NetItemPickedAction.Invoke(w => {
                 w.Write(chestId);
                 PickupIndex.WriteToNetworkWriter(w, selectedPickup);
