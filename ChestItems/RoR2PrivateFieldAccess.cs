@@ -61,8 +61,10 @@ namespace ChestItems
         {
             FieldInfo field = declaringType.GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
             if (field == null) 
+            {
                 logger.LogError($"Required RoR2 private field was not found: {declaringType.FullName}.{fieldName}");
-            
+                LogAvailableFields(declaringType);
+            }
             return field;
         }
 
@@ -128,6 +130,15 @@ namespace ChestItems
             {
                 logger.LogError($"Failed to write {fieldLabel}: {ex}");
                 return false;
+            }
+        }
+
+        private void LogAvailableFields(Type declaringType) 
+        {
+            FieldInfo[] fields = declaringType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            foreach (FieldInfo field in fields) 
+            {
+                logger.LogInfo($"Available field on {declaringType.FullName}: {field.FieldType.FullName} {field.Name}");
             }
         }
     }
