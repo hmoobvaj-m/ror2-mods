@@ -59,12 +59,10 @@ namespace ChestItems
 
         private FieldInfo ResolveField(Type declaringType, string fieldName) 
         {
-            FieldInfo field = declaringType.GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
+            FieldInfo field = declaringType.GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
             if (field == null) 
-            {
                 logger.LogError($"Required RoR2 private field was not found: {declaringType.FullName}.{fieldName}");
-            }
-
+            
             return field;
         }
 
@@ -89,7 +87,7 @@ namespace ChestItems
             {
                 rawValue = field.GetValue(target);
             } 
-            
+
             catch (Exception ex) 
             {
                 logger.LogError($"Failed to read {fieldLabel}: {ex}");

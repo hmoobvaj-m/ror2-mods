@@ -15,11 +15,13 @@ using UnityEngine.Events;
 
 namespace ChestItems {
 
-    [BepInPlugin(ModGuid, "Chest Item Picker", "1.1.1")]
+    [BepInPlugin(ModGuid, "Chest Item Picker V2", "1.0.0")]
     [BepInDependency(NetworkingAPI.PluginGUID)]
+    [BepInIncompatibility(OriginalModGuid)]    
     public class ChestItemsPlugin : BaseUnityPlugin {
 
-        private const string ModGuid = "com.github.mcmrarm.chestitempicker";
+        private const string OriginalModGuid = "com.github.mcmrarm.chestitempicker";
+        private const string ModGuid = "com.github.hmoobvaj-m.chestitempickerv2";
         private RoR2PrivateFieldAccess privateFieldAccess;
 
         private const float PendingPickerRequestTimeoutSeconds = 30f;
@@ -47,6 +49,7 @@ namespace ChestItems {
             Instance = this;
             NetworkingAPI.RegisterMessageType<ShowItemPickerMessage>();
             NetworkingAPI.RegisterMessageType<ItemPickedMessage>();
+            Logger.LogInfo("Chest Item Picker V2 loaded.");
         }
 
         private void OnDestroy() 
