@@ -2,6 +2,7 @@
 using BepInEx.Logging;
 using LeTai.Asset.TranslucentImage;
 using R2API.Networking;
+using R2API.Networking.Interfaces;
 using RoR2;
 using RoR2.UI;
 using System;
@@ -20,6 +21,20 @@ namespace ChestItems {
 
         private const string ModGuid = "com.github.mcmrarm.chestitempicker";
         private RoR2PrivateFieldAccess privateFieldAccess;
+
+        private void Awake() 
+        {
+            Instance = this;
+            NetworkingAPI.RegisterMessageType<ShowItemPickerMessage>();
+            NetworkingAPI.RegisterMessageType<ItemPickedMessage>();
+        }
+
+        private void OnDestroy() 
+        {
+            if (Instance == this)
+                Instance = null;
+        }
+
         public void Start() {
             privateFieldAccess = new RoR2PrivateFieldAccess(Logger);
             if (!privateFieldAccess.IsAvailable) 
@@ -127,7 +142,13 @@ namespace ChestItems {
             if (pickups.Count == 0)
                 return false;
 
-            CallNetShowItemPicker(user, ctr.netId, pickups);
+            if (user.connectionToClient == null) 
+            {
+                Logger.LogWarning("Could not show item picker because the target user has no client connection.");
+                return false;
+            }
+
+            new ShowItemPickerMessage(ctr.netId, pickups).Send(user.connectionToClient);
             return true;
         }
 
@@ -280,54 +301,43 @@ namespace ChestItems {
             ctr.GetComponent<RectTransform>().SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, itemCtr.GetComponent<RectTransform>().sizeDelta.y + 100f + 20f);
         }
 
+        internal static ChestItemsPlugin Instance { get; private set; }
+
         public delegate void ItemCallback(PickupIndex index);
-        
 
-        // I used the annotations to just make the code more readable, they are unused if compiling via VS (and if compiling via unity they add additional asserts)
-
-        [Client]
-        private void NetShowItemPicker(NetworkUser user, NetworkReader reader) 
+        internal void HandleShowItemPicker(NetworkInstanceId targetId, List<PickupIndex> pickups) 
         {
-            var chestId = reader.ReadNetworkId();
-            int count = reader.ReadInt32();
-            var pickups = new List<PickupIndex>(count);
-            for (int i = 0; i < count; i++)
-                pickups.Add(PickupIndex.ReadFromNetworkReader(reader));
-
-            ShowItemPicker(pickups, x => CallNetItemPicked(chestId, x));
+            ShowItemPicker(pickups, selectedPickup => SendItemPicked(targetId, selectedPickup));
         }
 
-        [Server]
-        private void CallNetShowItemPicker(NetworkUser user, NetworkInstanceId chestId, List<PickupIndex> pickups) 
+        private void SendItemPicked(NetworkInstanceId targetId, PickupIndex selectedPickup) 
         {
-            NetShowItemPickerAction.Invoke(w => {
-                w.Write(chestId);
-                w.Write(pickups.Count);
-                foreach (var i in pickups)
-                    PickupIndex.WriteToNetworkWriter(w, i);
-            }, user);
+            new ItemPickedMessage(targetId, selectedPickup).Send(NetworkDestination.Server);
         }
 
-        [Server]
-        private void NetItemPicked(NetworkUser user, NetworkReader reader) 
+        internal void HandleItemPicked(NetworkInstanceId targetId, PickupIndex selectedPickup) 
         {
-            var chestNetId = reader.ReadNetworkIdentity();
-            var selectedPickup = PickupIndex.ReadFromNetworkReader(reader);
-            
-            var chest = chestNetId.GetComponent<ChestBehavior>();
+            GameObject targetObject = Util.FindNetworkObject(targetId);
+            if (targetObject == null) 
+            {
+                Logger.LogWarning($"Could not apply selected pickup because network object {targetId} was not found.");
+                return;
+            }
+
+            var chest = targetObject.GetComponent<ChestBehavior>();
             if (chest != null) 
             {
                 if (!privateFieldAccess.TrySetChestDropPickup(chest, selectedPickup)) 
                     return;
-                
 
-                if (FindPersistentListener(chest.GetComponent<PurchaseInteraction>().onPurchase, chest, "ItemDrop") != -1) // Rusty Lockbox
+                if (FindPersistentListener(chest.GetComponent<PurchaseInteraction>().onPurchase, chest, "ItemDrop") != -1) 
                     chest.ItemDrop();
-
+                
                 chest.Open();
+                return;
             }
 
-            var terminal = chestNetId.GetComponent<ShopTerminalBehavior>();
+            var terminal = targetObject.GetComponent<ShopTerminalBehavior>();
             if (terminal != null) 
             {
                 if (!privateFieldAccess.TrySetShopTerminalPickupIndex(terminal, selectedPickup)) 
@@ -335,17 +345,9 @@ namespace ChestItems {
                 
                 terminal.DropPickup();
                 terminal.SetNoPickup();
+                return;
             }
+            Logger.LogWarning($"Selected pickup target {targetId} was not a supported chest or shop terminal.");
         }
-
-        [Client]
-        private void CallNetItemPicked(NetworkInstanceId chestId, PickupIndex selectedPickup) 
-        {
-            NetItemPickedAction.Invoke(w => {
-                w.Write(chestId);
-                PickupIndex.WriteToNetworkWriter(w, selectedPickup);
-            });
-        }
-
     }
 }
