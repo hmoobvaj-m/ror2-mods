@@ -1,8 +1,7 @@
 ﻿using BepInEx;
 using BepInEx.Logging;
 using LeTai.Asset.TranslucentImage;
-using MiniRpcLib;
-using MiniRpcLib.Action;
+using R2API.Networking;
 using RoR2;
 using RoR2.UI;
 using System;
@@ -17,7 +16,7 @@ using UnityEngine.Events;
 namespace ChestItems {
 
     [BepInPlugin(ModGuid, "Chest Item Picker", "1.1.1")]
-    [BepInDependency(MiniRpcPlugin.Dependency)]
+    [BepInDependency(NetworkingAPI.PluginGUID)]
     public class ChestItemsPlugin : BaseUnityPlugin {
 
         private const string ModGuid = "com.github.mcmrarm.chestitempicker";
@@ -26,13 +25,9 @@ namespace ChestItems {
         private static FieldInfo shopTerminalBehaviorPickupIndexMember = typeof(ShopTerminalBehavior).GetField("pickupIndex", BindingFlags.NonPublic | BindingFlags.Instance);
         private static FieldInfo multiShopControllerGameObjectsMember = typeof(MultiShopController).GetField("terminalGameObjects", BindingFlags.NonPublic | BindingFlags.Instance);
 
-        private IRpcAction<Action<NetworkWriter>> NetShowItemPickerAction;
-        private IRpcAction<Action<NetworkWriter>> NetItemPickedAction;
 
         public void Start() {
-            var miniRpc = MiniRpc.CreateInstance(ModGuid);
-            NetShowItemPickerAction = miniRpc.RegisterAction(Target.Client, NetShowItemPicker);
-            NetItemPickedAction = miniRpc.RegisterAction(Target.Server, NetItemPicked);
+
 
             On.RoR2.ChestBehavior.Start += (orig, self) => {
                 orig(self);
