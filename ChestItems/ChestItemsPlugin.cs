@@ -277,6 +277,22 @@ namespace ChestItems {
                     case ItemTier.Boss:
                         availablePickups.AddRange(Run.instance.availableBossDropList);
                         break;
+
+                    case ItemTier.VoidTier1:
+                        availablePickups.AddRange(Run.instance.availableVoidTier1DropList);
+                        break;
+
+                    case ItemTier.VoidTier2:
+                        availablePickups.AddRange(Run.instance.availableVoidTier2DropList);
+                        break;
+
+                    case ItemTier.VoidTier3:
+                        availablePickups.AddRange(Run.instance.availableVoidTier3DropList);
+                        break;
+
+                    case ItemTier.VoidBoss:
+                        availablePickups.AddRange(Run.instance.availableVoidBossDropList);
+                        break;
                 }
             } 
 
@@ -291,6 +307,7 @@ namespace ChestItems {
                 else 
                     availablePickups.AddRange(Run.instance.availableEquipmentDropList);
             }
+
             return availablePickups;
         }
 
