@@ -244,15 +244,14 @@ namespace ChestItems {
             return pickupIndex != PickupIndex.none;
         }
 
-                private List<PickupIndex> GetAvailablePickups(PickupIndex generatedPickup) 
+        private List<PickupIndex> GetAvailablePickups(PickupIndex generatedPickup) 
         {
             var availablePickups = new List<PickupIndex>();
             PickupDef generatedPickupDef = PickupCatalog.GetPickupDef(generatedPickup);
             if (generatedPickupDef == null)
                 return availablePickups;
 
-            if (generatedPickupDef.itemIndex != ItemIndex.None) 
-            {
+            if (generatedPickupDef.itemIndex != ItemIndex.None) {
                 ItemDef itemDef = ItemCatalog.GetItemDef(generatedPickupDef.itemIndex);
                 if (itemDef == null)
                     return availablePickups;
@@ -296,6 +295,7 @@ namespace ChestItems {
                         break;
                 }
             } 
+
             else if (generatedPickupDef.equipmentIndex != EquipmentIndex.None) 
             {
                 EquipmentDef equipmentDef = EquipmentCatalog.GetEquipmentDef(generatedPickupDef.equipmentIndex);
