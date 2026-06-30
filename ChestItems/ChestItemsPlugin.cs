@@ -82,15 +82,10 @@ namespace ChestItems {
             On.RoR2.ShopTerminalBehavior.Start += (orig, self) => {
                 orig(self);
 
-                if (!self.Networkhidden) 
-                    return;
-                
-
-                if (!privateFieldAccess.TryGetShopTerminalPickupIndex(self, out PickupIndex generatedPickup)) 
-                    return;
-                
-
                 var purchaseInteraction = self.GetComponent<PurchaseInteraction>();
+                if (purchaseInteraction == null) 
+                    return;
+
                 DisablePersistentListener(purchaseInteraction.onPurchase, self, "DropPickup");
                 DisablePersistentListener(purchaseInteraction.onPurchase, self, "SetNoPickup");
 
@@ -130,27 +125,41 @@ namespace ChestItems {
         {
             var availablePickups = new List<PickupIndex>();
             if (generatedPickup.itemIndex != ItemIndex.None) {
-                var tier = ItemCatalog.GetItemDef(generatedPickup.itemIndex).tier;
-                if (tier == ItemTier.Tier1 || tier == ItemTier.Tier2 || tier == ItemTier.Tier3)
-                    availablePickups.AddRange(Run.instance.availableTier1DropList);
+                ItemDef itemDef = ItemCatalog.GetItemDef(generatedPickup.itemIndex);
+                if (itemDef == null)
+                    return availablePickups;
 
-                if (tier == ItemTier.Tier2 || tier == ItemTier.Tier3)
-                    availablePickups.AddRange(Run.instance.availableTier2DropList);
+                switch (itemDef.tier) 
+                {
+                    case ItemTier.Tier1:
+                        availablePickups.AddRange(Run.instance.availableTier1DropList);
+                        break;
 
-                if (tier == ItemTier.Tier3)
-                    availablePickups.AddRange(Run.instance.availableTier3DropList);
+                    case ItemTier.Tier2:
+                        availablePickups.AddRange(Run.instance.availableTier2DropList);
+                        break;
 
-                if (tier == ItemTier.Lunar)
-                    availablePickups.AddRange(Run.instance.availableLunarItemDropList);
+                    case ItemTier.Tier3:
+                        availablePickups.AddRange(Run.instance.availableTier3DropList);
+                        break;
 
+                    case ItemTier.Lunar:
+                        availablePickups.AddRange(Run.instance.availableLunarItemDropList);
+                        break;
 
-                //if (tier != ItemTier.Tier1 && tier != ItemTier.Tier2 && tier != ItemTier.Tier3 && tier != ItemTier.Lunar)
-                //    return;
+                    case ItemTier.Boss:
+                        availablePickups.AddRange(Run.instance.availableBossDropList);
+                        break;
+                }
             } 
-            
+
             else if (generatedPickup.equipmentIndex != EquipmentIndex.None) 
             {
-                if (EquipmentCatalog.GetEquipmentDef(generatedPickup.equipmentIndex).isLunar) 
+                EquipmentDef equipmentDef = EquipmentCatalog.GetEquipmentDef(generatedPickup.equipmentIndex);
+                if (equipmentDef == null)
+                    return availablePickups;
+
+                if (equipmentDef.isLunar) 
                     availablePickups.AddRange(Run.instance.availableLunarEquipmentDropList);
                 else 
                     availablePickups.AddRange(Run.instance.availableEquipmentDropList);
@@ -198,6 +207,7 @@ namespace ChestItems {
         private void ShowItemPicker(List<PickupIndex> availablePickups, ItemCallback cb) 
         {
             var itemInventoryDisplay = GameObject.Find("ItemInventoryDisplay");
+            bool selectionSubmitted = false;
 
             float uiWidth = 400f;
             if (availablePickups.Count > 8 * 5) // at least 5 rows of 8 items
@@ -278,6 +288,10 @@ namespace ChestItems {
                 var item = Instantiate<GameObject>(itemIconPrefab, itemCtr.transform).GetComponent<ItemIcon>();
                 item.SetItemIndex(index.itemIndex, 1);
                 item.gameObject.AddComponent<Button>().onClick.AddListener(() => {
+                    if (selectionSubmitted)
+                        return;
+
+                    selectionSubmitted = true;
                     Logger.LogInfo("Item picked: " + index);
                     UnityEngine.Object.Destroy(g);
                     cb(index);
@@ -297,6 +311,10 @@ namespace ChestItems {
                 item.tooltipProvider.bodyToken = def.pickupToken;
                 item.tooltipProvider.bodyColor = Color.gray;
                 item.gameObject.AddComponent<Button>().onClick.AddListener(() => {
+                    if (selectionSubmitted)
+                        return;
+
+                    selectionSubmitted = true;
                     Logger.LogInfo("Equipment picked: " + index);
                     UnityEngine.Object.Destroy(g);
                     cb(index);
