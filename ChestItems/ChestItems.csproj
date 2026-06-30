@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <WarningsAsErrors>CS0618</WarningsAsErrors>
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>ChestItemPickerV2</AssemblyName>
     <RootNamespace>ChestItems</RootNamespace>
