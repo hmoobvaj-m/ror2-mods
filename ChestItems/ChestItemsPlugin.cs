@@ -244,14 +244,15 @@ namespace ChestItems {
             return pickupIndex != PickupIndex.none;
         }
 
-        private List<PickupIndex> GetAvailablePickups(PickupIndex generatedPickup) 
+                private List<PickupIndex> GetAvailablePickups(PickupIndex generatedPickup) 
         {
             var availablePickups = new List<PickupIndex>();
             PickupDef generatedPickupDef = PickupCatalog.GetPickupDef(generatedPickup);
             if (generatedPickupDef == null)
                 return availablePickups;
 
-            if (generatedPickupDef.itemIndex != ItemIndex.None) {
+            if (generatedPickupDef.itemIndex != ItemIndex.None) 
+            {
                 ItemDef itemDef = ItemCatalog.GetItemDef(generatedPickupDef.itemIndex);
                 if (itemDef == null)
                     return availablePickups;
@@ -277,9 +278,24 @@ namespace ChestItems {
                     case ItemTier.Boss:
                         availablePickups.AddRange(Run.instance.availableBossDropList);
                         break;
+
+                    case ItemTier.VoidTier1:
+                        availablePickups.AddRange(Run.instance.availableVoidTier1DropList);
+                        break;
+
+                    case ItemTier.VoidTier2:
+                        availablePickups.AddRange(Run.instance.availableVoidTier2DropList);
+                        break;
+
+                    case ItemTier.VoidTier3:
+                        availablePickups.AddRange(Run.instance.availableVoidTier3DropList);
+                        break;
+
+                    case ItemTier.VoidBoss:
+                        availablePickups.AddRange(Run.instance.availableVoidBossDropList);
+                        break;
                 }
             } 
-
             else if (generatedPickupDef.equipmentIndex != EquipmentIndex.None) 
             {
                 EquipmentDef equipmentDef = EquipmentCatalog.GetEquipmentDef(generatedPickupDef.equipmentIndex);
@@ -291,6 +307,7 @@ namespace ChestItems {
                 else 
                     availablePickups.AddRange(Run.instance.availableEquipmentDropList);
             }
+
             return availablePickups;
         }
 
