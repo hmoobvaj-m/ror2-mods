@@ -14,7 +14,6 @@ using UnityEngine.UI;
 using UnityEngine.Events;
 
 namespace ChestItems {
-
     [BepInPlugin(ModGuid, "Chest Item Picker V2", "1.0.0")]
     [BepInDependency(NetworkingAPI.PluginGUID)]
     [BepInIncompatibility(OriginalModGuid)]    
@@ -27,20 +26,25 @@ namespace ChestItems {
         private const float PendingPickerRequestTimeoutSeconds = 30f;
 
         private readonly Dictionary<NetworkInstanceId, PendingPickerRequest> pendingPickerRequests = new Dictionary<NetworkInstanceId, PendingPickerRequest>();
+        private readonly HashSet<NetworkInstanceId> pickerPurchaseReplays = new HashSet<NetworkInstanceId>();
 
         private sealed class PendingPickerRequest 
         {
-            internal PendingPickerRequest(NetworkInstanceId targetId, string requestToken, PickupIndex generatedPickup, float createdAt) 
+            internal PendingPickerRequest(NetworkInstanceId targetId, string requestToken, PickupIndex generatedPickup, Interactor interactor, PurchaseInteraction purchaseInteraction, float createdAt) 
             {
                 TargetId = targetId;
                 RequestToken = requestToken;
                 GeneratedPickup = generatedPickup;
+                Interactor = interactor;
+                PurchaseInteraction = purchaseInteraction;
                 CreatedAt = createdAt;
             }
 
             internal NetworkInstanceId TargetId { get; }
             internal string RequestToken { get; }
             internal PickupIndex GeneratedPickup { get; }
+            internal Interactor Interactor { get; }
+            internal PurchaseInteraction PurchaseInteraction { get; }
             internal float CreatedAt { get; }
         }
 
@@ -67,41 +71,106 @@ namespace ChestItems {
                 return;
             }
 
-            On.RoR2.ChestBehavior.Start += (orig, self) => {
-                orig(self);
-
-                var purchaseInteraction = self.GetComponent<PurchaseInteraction>();
-                DisablePersistentListener(purchaseInteraction.onPurchase, self, "ItemDrop");
-                DisablePersistentListener(purchaseInteraction.onPurchase, self, "Open");
-                purchaseInteraction.onPurchase.AddListener((v) => {
-                    if (!privateFieldAccess.TryGetChestDropPickup(self, out PickupIndex generatedPickup) || !HandlePurchaseInteraction(v, self, generatedPickup)) {
-                        self.Open();
-                    }
-                });
-            };
-            On.RoR2.ShopTerminalBehavior.Start += (orig, self) => {
-                orig(self);
-
-                var purchaseInteraction = self.GetComponent<PurchaseInteraction>();
-                if (purchaseInteraction == null) 
-                    return;
-
-                DisablePersistentListener(purchaseInteraction.onPurchase, self, "DropPickup");
-                DisablePersistentListener(purchaseInteraction.onPurchase, self, "SetNoPickup");
-
-                purchaseInteraction.onPurchase.AddListener((interactor) => 
-                {
-                    if (!privateFieldAccess.TryGetShopTerminalPickupIndex(self, out PickupIndex generatedPickup) || !HandlePurchaseInteraction(interactor, self, generatedPickup)) 
-                    {
-                        self.DropPickup();
-                        self.SetNoPickup();
-                    }
-                });
-            };
+            On.RoR2.PurchaseInteraction.OnInteractionBegin += PurchaseInteraction_OnInteractionBegin;
             On.RoR2.MultiShopController.CreateTerminals += (orig, self) => {
                 orig(self);
                 HandlePostCreateMultiShopTerminals(self);
             };
+        }
+
+        private void PurchaseInteraction_OnInteractionBegin(On.RoR2.PurchaseInteraction.orig_OnInteractionBegin orig, PurchaseInteraction self, Interactor interactor) 
+        {
+            if (TryHandlePickerPurchase(self, interactor)) 
+                return;
+            
+            orig(self, interactor);
+        }
+
+        private bool TryHandlePickerPurchase(PurchaseInteraction purchaseInteraction, Interactor interactor) 
+        {
+            if (!NetworkServer.active) 
+            {
+                Logger.LogInfo("Picker purchase skipped because NetworkServer.active is false.");
+                return false;
+            }
+
+            if (purchaseInteraction == null) 
+            {
+                Logger.LogInfo("Picker purchase skipped because PurchaseInteraction was null.");
+                return false;
+            }
+
+            if (interactor == null) 
+            {
+                Logger.LogInfo($"Picker purchase skipped for {DescribePurchaseInteraction(purchaseInteraction)} because Interactor was null.");
+                return false;
+            }
+
+            Logger.LogInfo($"Picker checking purchase interaction: {DescribePurchaseInteraction(purchaseInteraction)}");
+
+            if (!TryGetPickerTarget(purchaseInteraction.gameObject, out NetworkBehaviour target, out PickupIndex generatedPickup)) 
+            {
+                Logger.LogInfo($"Picker purchase skipped because no supported picker target was found. Object hierarchy: {DescribeObjectHierarchy(purchaseInteraction.gameObject)}");
+                return false;
+            }
+
+            Logger.LogInfo($"Picker target resolved to {target.GetType().Name} '{target.gameObject.name}' netId={target.netId} generatedPickup={generatedPickup}");
+
+            if (pickerPurchaseReplays.Remove(target.netId)) 
+            {
+                Logger.LogInfo($"Picker purchase replay allowed for {target.GetType().Name} '{target.gameObject.name}' netId={target.netId}.");
+                return false;
+            }
+
+            RemoveExpiredPendingPickerRequests();
+
+            if (pendingPickerRequests.ContainsKey(target.netId)) 
+            {
+                Logger.LogInfo($"Picker purchase blocked because a pending picker request already exists for netId={target.netId}.");
+                return true;
+            }
+
+            bool handled = HandlePurchaseInteraction(interactor, target, generatedPickup, purchaseInteraction);
+            Logger.LogInfo($"Picker purchase HandlePurchaseInteraction returned {handled} for {target.GetType().Name} '{target.gameObject.name}' generatedPickup={generatedPickup}.");
+            return handled;
+        }
+
+        private bool TryGetPickerTarget(GameObject targetObject, out NetworkBehaviour target, out PickupIndex generatedPickup) 
+        {
+            target = null;
+            generatedPickup = default;
+
+            var chest = targetObject.GetComponent<ChestBehavior>();
+            if (chest == null)
+                chest = targetObject.GetComponentInParent<ChestBehavior>();
+
+            if (chest == null)
+                chest = targetObject.GetComponentInChildren<ChestBehavior>();
+
+            if (chest != null && privateFieldAccess.TryGetChestDropPickup(chest, out generatedPickup)) 
+            {
+                target = chest;
+                return true;
+            }
+
+            var terminal = targetObject.GetComponent<ShopTerminalBehavior>();
+            if (terminal == null)
+                terminal = targetObject.GetComponentInParent<ShopTerminalBehavior>();
+
+            if (terminal == null)
+                terminal = targetObject.GetComponentInChildren<ShopTerminalBehavior>();
+
+            if (terminal != null) 
+            {
+                generatedPickup = terminal.CurrentPickupIndex();
+                if (generatedPickup != PickupIndex.none) 
+                {
+                    target = terminal;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static int FindPersistentListener(UnityEventBase ev, UnityEngine.Object target, string methodName) 
@@ -119,6 +188,54 @@ namespace ChestItems {
             int index = FindPersistentListener(ev, target, methodName);
             if (index != -1)
                 ev.SetPersistentListenerState(index, UnityEventCallState.Off);
+        }
+
+        private static string DescribePurchaseInteraction(PurchaseInteraction purchaseInteraction) 
+        {
+            if (purchaseInteraction == null)
+                return "null PurchaseInteraction";
+
+            NetworkIdentity identity = purchaseInteraction.GetComponent<NetworkIdentity>();
+            string netId = identity != null ? identity.netId.ToString() : "no NetworkIdentity";
+            return $"'{purchaseInteraction.gameObject.name}' displayNameToken='{purchaseInteraction.displayNameToken}' contextToken='{purchaseInteraction.contextToken}' costType={purchaseInteraction.costType} cost={purchaseInteraction.cost} netId={netId} components={DescribeComponents(purchaseInteraction.gameObject)}";
+        }
+
+        private static string DescribeObjectHierarchy(GameObject gameObject) 
+        {
+            if (gameObject == null)
+                return "null GameObject";
+
+            var parts = new List<string>();
+            Transform current = gameObject.transform;
+            int depth = 0;
+
+            while (current != null && depth < 8) 
+            {
+                parts.Add($"'{current.gameObject.name}'[{DescribeComponents(current.gameObject)}]");
+                current = current.parent;
+                depth++;
+            }
+
+            return string.Join(" <- parent ", parts.ToArray());
+        }
+
+        private static string DescribeComponents(GameObject gameObject) 
+        {
+            if (gameObject == null)
+                return "null GameObject";
+
+            var componentNames = new List<string>();
+            Component[] components = gameObject.GetComponents<Component>();
+
+            foreach (Component component in components) 
+            {
+                if (component == null)
+                    componentNames.Add("null");
+                else
+                    componentNames.Add(component.GetType().Name);
+            }
+
+            return string.Join(", ", componentNames.ToArray());
         }
 
         private List<PickupIndex> GetAvailablePickups(PickupIndex generatedPickup) 
@@ -167,15 +284,21 @@ namespace ChestItems {
             return availablePickups;
         }
 
-        private bool HandlePurchaseInteraction(Interactor interactor, NetworkBehaviour ctr, PickupIndex generatedPickup) 
+        private bool HandlePurchaseInteraction(Interactor interactor, NetworkBehaviour ctr, PickupIndex generatedPickup, PurchaseInteraction purchaseInteraction) 
         {
             var user = interactor.GetComponent<CharacterBody>()?.master?.GetComponent<PlayerCharacterMasterController>()?.networkUser;
             if (user == null)
+            {
+                Logger.LogInfo($"Picker purchase skipped for {ctr.GetType().Name} '{ctr.gameObject.name}' because no NetworkUser was found from the interactor.");
                 return false;
+            }
 
             List<PickupIndex> pickups = GetAvailablePickups(generatedPickup);
             if (pickups.Count == 0)
+            {
+                Logger.LogInfo($"Picker purchase skipped for {ctr.GetType().Name} '{ctr.gameObject.name}' because generatedPickup={generatedPickup} produced zero available picker options.");
                 return false;
+            }
             
 
             if (user.connectionToClient == null) 
@@ -184,7 +307,9 @@ namespace ChestItems {
                 return false;
             }
 
-            PendingPickerRequest request = CreatePendingPickerRequest(ctr.netId, generatedPickup);
+            Logger.LogInfo($"Picker purchase opening picker for {ctr.GetType().Name} '{ctr.gameObject.name}' netId={ctr.netId} with {pickups.Count} options.");
+
+            PendingPickerRequest request = CreatePendingPickerRequest(ctr.netId, generatedPickup, interactor, purchaseInteraction);
             new ShowItemPickerMessage(ctr.netId, request.RequestToken, pickups).Send(user.connectionToClient);
             return true;
         }
@@ -192,15 +317,31 @@ namespace ChestItems {
         private void HandlePostCreateMultiShopTerminals(MultiShopController multiShop) 
         {
             if (!privateFieldAccess.TryGetMultiShopTerminalGameObjects(multiShop, out GameObject[] terminalObjects)) 
+            {
+                Logger.LogInfo($"Picker multishop setup skipped for '{multiShop.gameObject.name}' because terminal GameObjects could not be read.");
                 return;
+            }
+
+            Logger.LogInfo($"Picker multishop setup found {terminalObjects.Length} terminals for '{multiShop.gameObject.name}'.");
             
             foreach (GameObject terminalObject in terminalObjects) 
             {
-                ShopTerminalBehavior terminal = terminalObject.GetComponent<ShopTerminalBehavior>();
-                if (terminal == null) 
+                if (terminalObject == null) 
+                {
+                    Logger.LogInfo("Picker multishop setup found a null terminal object.");
                     continue;
-                
-                terminal.Networkhidden = false;
+                }
+
+                ShopTerminalBehavior terminal = terminalObject.GetComponent<ShopTerminalBehavior>();
+                PurchaseInteraction purchaseInteraction = terminalObject.GetComponent<PurchaseInteraction>();
+
+                if (terminal == null) 
+                {
+                    Logger.LogInfo($"Picker multishop setup skipped '{terminalObject.name}' because it has no ShopTerminalBehavior. Components: {DescribeComponents(terminalObject)}");
+                    continue;
+                }
+
+                Logger.LogInfo($"Picker multishop terminal '{terminalObject.name}' purchaseInteraction={purchaseInteraction != null} currentPickupIndex={terminal.CurrentPickupIndex()} netId={terminal.netId} components={DescribeComponents(terminalObject)}");
             }
         }
 
@@ -279,49 +420,46 @@ namespace ChestItems {
             itemCtr.GetComponent<RectTransform>().sizeDelta = new Vector2(-16f, 0);
             itemCtr.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             
-            var itemIconPrefab = itemInventoryDisplay.GetComponent<ItemInventoryDisplay>().itemIconPrefab;
             foreach (PickupIndex index in availablePickups) 
             {
-                if (index.itemIndex == ItemIndex.None)
+                PickupDef pickupDef = PickupCatalog.GetPickupDef(index);
+                if (pickupDef == null)
                     continue;
 
-                var item = Instantiate<GameObject>(itemIconPrefab, itemCtr.transform).GetComponent<ItemIcon>();
-                item.SetItemIndex(index.itemIndex, 1);
-                item.gameObject.AddComponent<Button>().onClick.AddListener(() => {
+                AddPickupButton(itemCtr.transform, pickupDef.iconSprite, pickupDef.nameToken, pickupDef.baseColor, index, () => {
                     if (selectionSubmitted)
                         return;
 
                     selectionSubmitted = true;
-                    Logger.LogInfo("Item picked: " + index);
-                    UnityEngine.Object.Destroy(g);
-                    cb(index);
-                });
-            }
-            foreach (PickupIndex index in availablePickups) 
-            {
-                if (index.equipmentIndex == EquipmentIndex.None)
-                    continue;
-
-                var def = EquipmentCatalog.GetEquipmentDef(index.equipmentIndex);
-                var item = Instantiate<GameObject>(itemIconPrefab, itemCtr.transform).GetComponent<ItemIcon>();
-                item.GetComponent<RawImage>().texture = def.pickupIconTexture;
-                item.stackText.enabled = false;
-                item.tooltipProvider.titleToken = def.nameToken;
-                item.tooltipProvider.titleColor = ColorCatalog.GetColor(def.colorIndex);
-                item.tooltipProvider.bodyToken = def.pickupToken;
-                item.tooltipProvider.bodyColor = Color.gray;
-                item.gameObject.AddComponent<Button>().onClick.AddListener(() => {
-                    if (selectionSubmitted)
-                        return;
-
-                    selectionSubmitted = true;
-                    Logger.LogInfo("Equipment picked: " + index);
+                    Logger.LogInfo("Pickup picked: " + index);
                     UnityEngine.Object.Destroy(g);
                     cb(index);
                 });
             }
             LayoutRebuilder.ForceRebuildLayoutImmediate(itemCtr.GetComponent<RectTransform>());
             ctr.GetComponent<RectTransform>().SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, itemCtr.GetComponent<RectTransform>().sizeDelta.y + 100f + 20f);
+        }
+
+        private void AddPickupButton(Transform parent, Sprite pickupIconSprite, string titleToken, Color titleColor, PickupIndex pickupIndex, UnityAction onClick) 
+        {
+            var item = new GameObject();
+            item.name = "Pickup " + pickupIndex;
+            item.transform.SetParent(parent, false);
+
+            var image = item.AddComponent<Image>();
+            image.sprite = pickupIconSprite;
+            image.preserveAspect = true;
+            image.raycastTarget = true;
+
+            var tooltipProvider = item.AddComponent<TooltipProvider>();
+            tooltipProvider.titleToken = titleToken;
+            tooltipProvider.titleColor = titleColor;
+            tooltipProvider.bodyToken = "";
+            tooltipProvider.bodyColor = Color.gray;
+
+            var button = item.AddComponent<Button>();
+            button.targetGraphic = image;
+            button.onClick.AddListener(onClick);
         }
 
         internal static ChestItemsPlugin Instance { get; private set; }
@@ -394,14 +532,14 @@ namespace ChestItems {
             }
 
             pendingPickerRequests.Remove(targetId);
-            ApplySelectedPickup(targetObject, selectedPickup);
+            ApplySelectedPickup(targetObject, request, selectedPickup);
         }
 
-        private PendingPickerRequest CreatePendingPickerRequest(NetworkInstanceId targetId, PickupIndex generatedPickup) 
+        private PendingPickerRequest CreatePendingPickerRequest(NetworkInstanceId targetId, PickupIndex generatedPickup, Interactor interactor, PurchaseInteraction purchaseInteraction) 
         {
             RemoveExpiredPendingPickerRequests();
 
-            var request = new PendingPickerRequest(targetId, Guid.NewGuid().ToString("N"), generatedPickup, Time.realtimeSinceStartup);
+            var request = new PendingPickerRequest(targetId, Guid.NewGuid().ToString("N"), generatedPickup, interactor, purchaseInteraction, Time.realtimeSinceStartup);
             pendingPickerRequests[targetId] = request;
             return request;
         }
@@ -443,12 +581,15 @@ namespace ChestItems {
             
             var terminal = targetObject.GetComponent<ShopTerminalBehavior>();
             if (terminal != null) 
-                return privateFieldAccess.TryGetShopTerminalPickupIndex(terminal, out generatedPickup);
+            {
+                generatedPickup = terminal.CurrentPickupIndex();
+                return generatedPickup != PickupIndex.none;
+            }
             
             return false;
         }
 
-        private void ApplySelectedPickup(GameObject targetObject, PickupIndex selectedPickup) 
+        private void ApplySelectedPickup(GameObject targetObject, PendingPickerRequest request, PickupIndex selectedPickup) 
         {
             var chest = targetObject.GetComponent<ChestBehavior>();
             if (chest != null) 
@@ -456,25 +597,35 @@ namespace ChestItems {
                 if (!privateFieldAccess.TrySetChestDropPickup(chest, selectedPickup)) 
                     return;             
 
-                if (FindPersistentListener(chest.GetComponent<PurchaseInteraction>().onPurchase, chest, "ItemDrop") != -1) 
-                    chest.ItemDrop();
-                
-                chest.Open();
+                ReplayPurchase(targetObject, request);
                 return;
             }
 
             var terminal = targetObject.GetComponent<ShopTerminalBehavior>();
             if (terminal != null) 
             {
-                if (!privateFieldAccess.TrySetShopTerminalPickupIndex(terminal, selectedPickup)) 
-                    return;
-                
-                terminal.DropPickup();
-                terminal.SetNoPickup();
+                terminal.SetPickupIndex(selectedPickup);
+                ReplayPurchase(targetObject, request);
+                return;
+            }
+            Logger.LogWarning("Selected pickup target was not a supported chest or shop terminal.");
+        }
+
+        private void ReplayPurchase(GameObject targetObject, PendingPickerRequest request) 
+        {
+            if (request.PurchaseInteraction == null) 
+            {
+                Logger.LogWarning($"Could not replay picker purchase for {request.TargetId} because the PurchaseInteraction was missing.");
                 return;
             }
 
-            Logger.LogWarning("Selected pickup target was not a supported chest or shop terminal.");
+            if (request.Interactor == null) 
+            {
+                Logger.LogWarning($"Could not replay picker purchase for {request.TargetId} because the original interactor was missing.");
+                return;
+            }
+            pickerPurchaseReplays.Add(request.TargetId);
+            request.PurchaseInteraction.OnInteractionBegin(request.Interactor);
         }
     }
 }
