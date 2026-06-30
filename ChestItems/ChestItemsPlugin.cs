@@ -93,8 +93,11 @@ namespace ChestItems {
                 var purchaseInteraction = self.GetComponent<PurchaseInteraction>();
                 DisablePersistentListener(purchaseInteraction.onPurchase, self, "DropPickup");
                 DisablePersistentListener(purchaseInteraction.onPurchase, self, "SetNoPickup");
-                purchaseInteraction.onPurchase.AddListener((v) => {
-                    if (!HandlePurchaseInteraction(v, self, generatedPickup)) {
+
+                purchaseInteraction.onPurchase.AddListener((interactor) => 
+                {
+                    if (!privateFieldAccess.TryGetShopTerminalPickupIndex(self, out PickupIndex generatedPickup) || !HandlePurchaseInteraction(interactor, self, generatedPickup)) 
+                    {
                         self.DropPickup();
                         self.SetNoPickup();
                     }
@@ -179,39 +182,16 @@ namespace ChestItems {
 
         private void HandlePostCreateMultiShopTerminals(MultiShopController multiShop) 
         {
-            // Show items from all terminals except for one
-            if (!privateFieldAccess.TryGetMultiShopTerminalGameObjects(multiShop, out GameObject[] objects)) {
+            if (!privateFieldAccess.TryGetMultiShopTerminalGameObjects(multiShop, out GameObject[] terminalObjects)) 
                 return;
-}
-
-            GameObject hidden = null;
-            foreach (GameObject o in objects) 
+            
+            foreach (GameObject terminalObject in terminalObjects) 
             {
-                if (o.GetComponent<ShopTerminalBehavior>().Networkhidden)
-                    hidden = o;
-            }
-
-            if (hidden == null)
-                hidden = Run.instance.treasureRng.NextElementUniform<GameObject>(objects);
-
-            foreach (GameObject o in objects)
-                o.GetComponent<ShopTerminalBehavior>().Networkhidden = (o == hidden);
-
-            // Fix anim - Don't close the terminal we are picking the item from.
-            foreach (GameObject gameObject in objects) 
-            {
-                // Remove the .DisableAllTerminals listener and reimplement it
-                gameObject.GetComponent<PurchaseInteraction>().onPurchase.RemoveAllListeners();
-                gameObject.GetComponent<PurchaseInteraction>().onPurchase.AddListener((v) => {
-                    foreach (GameObject other in objects) 
-                    {
-                        if (other == gameObject) // CHANGE: exclude the terminal we are opening
-                            continue;
-                        other.GetComponent<PurchaseInteraction>().Networkavailable = false;
-                        other.GetComponent<ShopTerminalBehavior>().SetNoPickup();
-                    }
-                    multiShop.Networkavailable = false;
-                });
+                ShopTerminalBehavior terminal = terminalObject.GetComponent<ShopTerminalBehavior>();
+                if (terminal == null) 
+                    continue;
+                
+                terminal.Networkhidden = false;
             }
         }
 
@@ -368,21 +348,27 @@ namespace ChestItems {
                 return;
             }
 
-            if (!TryGetCurrentGeneratedPickup(targetObject, out PickupIndex currentGeneratedPickup)) 
+            PickupIndex validationPickup = request.GeneratedPickup;
+
+            if (targetObject.GetComponent<ChestBehavior>() != null) 
             {
-                pendingPickerRequests.Remove(targetId);
-                Logger.LogWarning($"Rejected item picker response because generated pickup could not be read for {targetId}.");
-                return;
+                if (!TryGetCurrentGeneratedPickup(targetObject, out PickupIndex currentGeneratedPickup)) 
+                {
+                    pendingPickerRequests.Remove(targetId);
+                    Logger.LogWarning($"Rejected item picker response because generated pickup could not be read for {targetId}.");
+                    return;
+                }
+
+                if (!request.GeneratedPickup.Equals(currentGeneratedPickup)) 
+                {
+                    pendingPickerRequests.Remove(targetId);
+                    Logger.LogWarning($"Rejected item picker response for {targetId} because the generated pickup changed before selection was applied.");
+                    return;
+                }
+                validationPickup = currentGeneratedPickup;
             }
 
-            if (!request.GeneratedPickup.Equals(currentGeneratedPickup)) 
-            {
-                pendingPickerRequests.Remove(targetId);
-                Logger.LogWarning($"Rejected item picker response for {targetId} because the generated pickup changed before selection was applied.");
-                return;
-            }
-
-            List<PickupIndex> currentAllowedPickups = GetAvailablePickups(currentGeneratedPickup);
+            List<PickupIndex> currentAllowedPickups = GetAvailablePickups(validationPickup);
             if (!PickupListContains(currentAllowedPickups, selectedPickup)) 
             {
                 Logger.LogWarning($"Rejected invalid pickup selection {selectedPickup} for target {targetId}.");
