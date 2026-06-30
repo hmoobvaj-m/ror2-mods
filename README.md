@@ -33,7 +33,7 @@ No major fork-specific changes are currently documented.
 Original mod: **TruePause**  
 Fork version: **TruePause**
 
-**Status:** Not yet verified
+**Status:** Not yet verified / Superseded by vanilla multiplayer pause
 
 Allows pausing the game in multiplayer.
 
