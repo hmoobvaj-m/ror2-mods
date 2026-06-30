@@ -22,7 +22,7 @@ This fork updates the original Chest Item Picker behavior for newer Risk of Rain
 Original mod: **ItemCounter**  
 Fork version: **ItemCounter**
 
-**Status:** Not Started
+**Status:** Not yet verified
 
 Adds a counter to track the number of items you have for each tier.
 
@@ -33,7 +33,7 @@ No major fork-specific changes are currently documented.
 Original mod: **TruePause**  
 Fork version: **TruePause**
 
-**Status:** Not Started
+**Status:** Not yet verified
 
 Allows pausing the game in multiplayer.
 
