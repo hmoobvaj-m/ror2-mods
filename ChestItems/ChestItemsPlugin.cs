@@ -160,16 +160,11 @@ namespace ChestItems {
             if (terminal == null)
                 terminal = targetObject.GetComponentInChildren<ShopTerminalBehavior>();
 
-            if (terminal != null) 
+            if (TryGetTerminalPickupIndex(terminal, out generatedPickup)) 
             {
-                generatedPickup = terminal.CurrentPickupIndex();
-                if (generatedPickup != PickupIndex.none) 
-                {
-                    target = terminal;
-                    return true;
-                }
+                target = terminal;
+                return true;
             }
-
             return false;
         }
 
@@ -238,11 +233,26 @@ namespace ChestItems {
             return string.Join(", ", componentNames.ToArray());
         }
 
+        private static bool TryGetTerminalPickupIndex(ShopTerminalBehavior terminal, out PickupIndex pickupIndex) 
+        {
+            pickupIndex = PickupIndex.none;
+            if (terminal == null)
+                return false;
+
+            UniquePickup currentPickup = terminal.CurrentPickup();
+            pickupIndex = currentPickup.pickupIndex;
+            return pickupIndex != PickupIndex.none;
+        }
+
         private List<PickupIndex> GetAvailablePickups(PickupIndex generatedPickup) 
         {
             var availablePickups = new List<PickupIndex>();
-            if (generatedPickup.itemIndex != ItemIndex.None) {
-                ItemDef itemDef = ItemCatalog.GetItemDef(generatedPickup.itemIndex);
+            PickupDef generatedPickupDef = PickupCatalog.GetPickupDef(generatedPickup);
+            if (generatedPickupDef == null)
+                return availablePickups;
+
+            if (generatedPickupDef.itemIndex != ItemIndex.None) {
+                ItemDef itemDef = ItemCatalog.GetItemDef(generatedPickupDef.itemIndex);
                 if (itemDef == null)
                     return availablePickups;
 
@@ -270,9 +280,9 @@ namespace ChestItems {
                 }
             } 
 
-            else if (generatedPickup.equipmentIndex != EquipmentIndex.None) 
+            else if (generatedPickupDef.equipmentIndex != EquipmentIndex.None) 
             {
-                EquipmentDef equipmentDef = EquipmentCatalog.GetEquipmentDef(generatedPickup.equipmentIndex);
+                EquipmentDef equipmentDef = EquipmentCatalog.GetEquipmentDef(generatedPickupDef.equipmentIndex);
                 if (equipmentDef == null)
                     return availablePickups;
 
@@ -341,7 +351,8 @@ namespace ChestItems {
                     continue;
                 }
 
-                Logger.LogInfo($"Picker multishop terminal '{terminalObject.name}' purchaseInteraction={purchaseInteraction != null} currentPickupIndex={terminal.CurrentPickupIndex()} netId={terminal.netId} components={DescribeComponents(terminalObject)}");
+                TryGetTerminalPickupIndex(terminal, out PickupIndex currentPickupIndex);
+                Logger.LogInfo($"Picker multishop terminal '{terminalObject.name}' purchaseInteraction={purchaseInteraction != null} currentPickupIndex={currentPickupIndex} netId={terminal.netId} components={DescribeComponents(terminalObject)}");
             }
         }
 
@@ -580,11 +591,8 @@ namespace ChestItems {
                 return privateFieldAccess.TryGetChestDropPickup(chest, out generatedPickup);
             
             var terminal = targetObject.GetComponent<ShopTerminalBehavior>();
-            if (terminal != null) 
-            {
-                generatedPickup = terminal.CurrentPickupIndex();
-                return generatedPickup != PickupIndex.none;
-            }
+            if (TryGetTerminalPickupIndex(terminal, out generatedPickup)) 
+                return true;
             
             return false;
         }
@@ -604,7 +612,7 @@ namespace ChestItems {
             var terminal = targetObject.GetComponent<ShopTerminalBehavior>();
             if (terminal != null) 
             {
-                terminal.SetPickupIndex(selectedPickup);
+                terminal.SetPickup(new UniquePickup(selectedPickup), false);
                 ReplayPurchase(targetObject, request);
                 return;
             }
