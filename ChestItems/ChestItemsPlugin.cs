@@ -140,6 +140,12 @@ namespace ChestItems {
             target = null;
             generatedPickup = default;
 
+            if(targetObject == null)
+                return false;
+            
+            if(IsPrinterTarget(targetObject))
+                return false;
+
             var chest = targetObject.GetComponent<ChestBehavior>();
             if (chest == null)
                 chest = targetObject.GetComponentInParent<ChestBehavior>();
@@ -651,6 +657,63 @@ namespace ChestItems {
             }
             pickerPurchaseReplays.Add(request.TargetId);
             request.PurchaseInteraction.OnInteractionBegin(request.Interactor);
+        }
+
+        private static bool IsPrinterTarget(GameObject targetObject) 
+        {
+            if (targetObject == null)
+                return false;
+
+            if (IsPrinterObjectName(targetObject.name))
+                return true;
+
+            PurchaseInteraction purchaseInteraction = targetObject.GetComponent<PurchaseInteraction>();
+            if (IsPrinterPurchaseInteraction(purchaseInteraction))
+                return true;
+
+            PurchaseInteraction parentPurchaseInteraction = targetObject.GetComponentInParent<PurchaseInteraction>();
+            if (IsPrinterPurchaseInteraction(parentPurchaseInteraction))
+                return true;
+
+            PurchaseInteraction childPurchaseInteraction = targetObject.GetComponentInChildren<PurchaseInteraction>();
+            if (IsPrinterPurchaseInteraction(childPurchaseInteraction))
+                return true;
+
+            return false;
+        }
+
+        private static bool IsPrinterPurchaseInteraction(PurchaseInteraction purchaseInteraction) 
+        {
+            if (purchaseInteraction == null)
+                return false;
+
+            return IsPrinterDisplayNameToken(purchaseInteraction.displayNameToken)
+                || IsPrinterContextToken(purchaseInteraction.contextToken)
+                || IsPrinterObjectName(purchaseInteraction.gameObject.name);
+        }
+
+        private static bool IsPrinterDisplayNameToken(string displayNameToken) 
+        {
+            if (string.IsNullOrWhiteSpace(displayNameToken))
+                return false;
+
+            return displayNameToken.IndexOf("DUPLICATOR", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsPrinterContextToken(string contextToken) 
+        {
+            if (string.IsNullOrWhiteSpace(contextToken))
+                return false;
+
+            return contextToken.IndexOf("DUPLICATOR", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsPrinterObjectName(string objectName) 
+        {
+            if (string.IsNullOrWhiteSpace(objectName))
+                return false;
+
+            return objectName.IndexOf("Duplicator", StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }
