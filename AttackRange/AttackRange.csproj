@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+
+    <AssemblyName>AttackRange</AssemblyName>
+    <RootNamespace>AttackRange</RootNamespace>
+
+    <RestoreAdditionalProjectSources>
+      https://api.nuget.org/v3/index.json;
+      https://nuget.bepinex.dev/v3/index.json
+    </RestoreAdditionalProjectSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" />
+
+    <PackageReference Include="R2API.Items" Version="1.0.8" />
+    <PackageReference Include="R2API.Language" Version="1.1.0" />
+
+    <PackageReference Include="UnityEngine.Modules"
+                      Version="2021.3.33"
+                      IncludeAssets="compile" />
+
+    <PackageReference Include="RiskOfRain2.GameLibs"
+                      Version="1.4.1-r.0" />
+
+    <PackageReference Include="MMHOOK.RoR2"
+                      Version="2025.11.19"
+                      NoWarn="NU1701" />
+
+    <PackageReference Include="RoR2BepInExPack"
+                      Version="1.43.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Language/en.language">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>en.language</TargetPath>
+    </None>
+  </ItemGroup>
+
+</Project>
