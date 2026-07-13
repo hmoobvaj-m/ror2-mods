@@ -1,6 +1,8 @@
 using AttackRange.Content;
 using AttackRange.Range;
+
 using BepInEx;
+
 using R2API;
 
 namespace AttackRange
@@ -17,14 +19,14 @@ namespace AttackRange
         private void Awake()
         {
             RangeExtenderItem.Initialize();
-            BulletRangeHooks.Initialize();
+            RangeAdapterRegistry.Initialize(Logger);
 
             Logger.LogInfo($"{PluginName} {PluginVersion} loaded.");
         }
 
         private void OnDestroy()
         {
-            BulletRangeHooks.Dispose();
+            RangeAdapterRegistry.Dispose();
         }
     }
 }

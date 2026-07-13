@@ -2,13 +2,13 @@
   "strings": {
     "HMOOBVAJM_ATTACKRANGE_RANGEEXTENDER_NAME": "Range Extender",
     "HMOOBVAJM_ATTACKRANGE_RANGEEXTENDER_PICKUP": "Bullets travel farther.",
-    "HMOOBVAJM_ATTACKRANGE_RANGEEXTENDER_DESCRIPTION": "Increase the maximum distance of <style=cIsDamage>bullet attacks</style> by <style=cIsUtility>25%</style> <style=cStack>(+15% per stack, up to +100%)</style>.",
+    "HMOOBVAJM_ATTACKRANGE_RANGEEXTENDER_DESCRIPTION": "Increase the maximum distance of <style=cIsDamage>bullet attacks</style> by <style=cIsUtility>15%</style> <style=cStack>(+15% per stack, up to +100%)</style>.",
     "HMOOBVAJM_ATTACKRANGE_RANGEEXTENDER_LORE": "A compact targeting assembly built to maintain accuracy far beyond standard engagement distances."
   },
   "en": {
     "HMOOBVAJM_ATTACKRANGE_RANGEEXTENDER_NAME": "Range Extender",
     "HMOOBVAJM_ATTACKRANGE_RANGEEXTENDER_PICKUP": "Bullets travel farther.",
-    "HMOOBVAJM_ATTACKRANGE_RANGEEXTENDER_DESCRIPTION": "Increase the maximum distance of <style=cIsDamage>bullet attacks</style> by <style=cIsUtility>25%</style> <style=cStack>(+15% per stack, up to +100%)</style>.",
+    "HMOOBVAJM_ATTACKRANGE_RANGEEXTENDER_DESCRIPTION": "Increase the maximum distance of <style=cIsDamage>bullet attacks</style> by <style=cIsUtility>15%</style> <style=cStack>(+15% per stack, up to +100%)</style>.",
     "HMOOBVAJM_ATTACKRANGE_RANGEEXTENDER_LORE": "A compact targeting assembly built to maintain accuracy far beyond standard engagement distances."
   }
 }
